@@ -1,3 +1,6 @@
+import re
+
+
 class Parser:
 
     def __init__(self, browser, from_cmdline=True, headless=True):
@@ -69,48 +72,82 @@ class Parser:
         self.output_content += "\n"
 
     def __parse_line(self, line: str):
+        variable_name = None
+        if ' SAVE ' in line:
+            line, variable_name = line.split(' SAVE ', 1)
+            variable_name = variable_name.strip()
+
         if line.startswith('GO TO '):
-            url = line[6:]
+            url = line[6:].strip()
             self.output_content += f'driver.get("{url}")\n'
+
         elif line.startswith('IMPLICITLY WAIT '):
-            impl_wait = line[16:]
-            if not isinstance(int(impl_wait), int) and not(float(impl_wait), float):
-                raise ValueError('implicitly_wait() accepts only integers or float values.')
+            impl_wait = line[16:].strip()
+            try:
+                impl_wait = float(impl_wait)
+            except ValueError:
+                raise ValueError('implicitly_wait() accepts only numeric values (int or float).')
 
-            self.output_content += f'driver.implicitly_wait({float(impl_wait)})\n'
+            self.output_content += f'driver.implicitly_wait({impl_wait})\n'
+
         elif line.startswith('CLICK BY '):
-            criteria = line[9:]
-            if criteria.startswith('ID '):
-                element_id = criteria[3:]
-                to_add = f'driver.find_element(By.ID, "{element_id}")'
-            elif criteria.startswith('NAME '):
-                element_name = criteria[5:]
-                to_add = f'driver.find_element(By.NAME, "{element_name}")'
-            elif criteria.startswith('CLASS '):
-                class_name = criteria[6:]
-                to_add = f'driver.find_element(By.CLASS_NAME, "{class_name}")'
-            elif criteria.startswith('TAG '):
-                tag_name = criteria[4:]
-                to_add = f'driver.find_element(By.TAG_NAME, "{tag_name}")'
-            elif criteria.startswith('CSS '):
-                css_selector = criteria[4:]
-                to_add = f'driver.find_element(By.CSS_SELECTOR, "{css_selector}")'
-            elif criteria.startswith('XPATH '):
-                xpath_expression = criteria[6:]
-                to_add = f'driver.find_element(By.XPATH, "{xpath_expression}")'
-            elif criteria.startswith('LINK_TEXT '):
-                link_text = criteria[10:]
-                to_add = f'driver.find_element(By.LINK_TEXT, "{link_text}")'
-            elif criteria.startswith('PARTIAL_LINK_TEXT '):
-                partial_link_text = criteria[17:]
-                to_add = f'driver.find_element(By.PARTIAL_LINK_TEXT, "{partial_link_text}")'
-            else:
-                raise ValueError("Invalid CLICK BY criteria specified.")
+            criteria = line[9:].strip()
+            to_add = self.__generate_find_element_code(criteria)
 
-            self.output_content += to_add + ".click()\n\n"
+            if variable_name:
+                self.output_content += f'{variable_name} = {to_add}\n'
+                self.output_content += f'{variable_name}.click()\n\n'
+            else:
+                self.output_content += f'{to_add}.click()\n\n'
+
+        elif line.startswith('TYPE BY '):
+            parts = line[8:]
+            match = re.search(r'^([A-Z_]+\s.*)\s"(.*)"$', parts)
+            if not match:
+                raise SyntaxError("TYPE BY command must be in the format TYPE BY <criteria> <text>")
+
+            criteria, text = match.groups()
+            to_add = self.__generate_find_element_code(criteria.strip())
+
+            if variable_name:
+                self.output_content += f'{variable_name} = {to_add}\n'
+                self.output_content += f'{variable_name}.send_keys("{text.strip()}")\n\n'
+            else:
+                self.output_content += f'{to_add}.send_keys("{text.strip()}")\n\n'
+
+        elif line.startswith('QUIT'):
+            self.output_content += 'driver.quit()\n\n'
+
+    def __generate_find_element_code(self, criteria: str) -> str:
+        if criteria.startswith('ID '):
+            element_id = criteria[3:].strip()
+            return f'driver.find_element(By.ID, "{element_id}")'
+        elif criteria.startswith('NAME '):
+            element_name = criteria[5:].strip()
+            return f'driver.find_element(By.NAME, "{element_name}")'
+        elif criteria.startswith('CLASS '):
+            class_name = criteria[6:].strip()
+            return f'driver.find_element(By.CLASS_NAME, "{class_name}")'
+        elif criteria.startswith('TAG '):
+            tag_name = criteria[4:].strip()
+            return f'driver.find_element(By.TAG_NAME, "{tag_name}")'
+        elif criteria.startswith('CSS '):
+            css_selector = criteria[4:].strip()
+            return f'driver.find_element(By.CSS_SELECTOR, "{css_selector}")'
+        elif criteria.startswith('XPATH '):
+            xpath_expression = criteria[6:].strip()
+            return f'driver.find_element(By.XPATH, "{xpath_expression}")'
+        elif criteria.startswith('LINK_TEXT '):
+            link_text = criteria[10:].strip()
+            return f'driver.find_element(By.LINK_TEXT, "{link_text}")'
+        elif criteria.startswith('PARTIAL_LINK_TEXT '):
+            partial_link_text = criteria[17:].strip()
+            return f'driver.find_element(By.PARTIAL_LINK_TEXT, "{partial_link_text}")'
+        else:
+            raise ValueError("Invalid element selection criteria specified.")
 
     def create_output_file(self, filename: str):
-        if self.output_content != '':
+        if self.output_content:
             with open(filename, 'w') as file:
                 file.write(self.output_content)
 
